@@ -1,7 +1,6 @@
 <p align="center">
-  <h2 align="center"> ViewSplat: View-Adaptive Dynamic Gaussian Splatting <br> for Feed-Forward Synthesis <br>
-  <p align="center">
-  </p>
+  <h2 align="center"> ViewSplat: View-Adaptive 3D Gaussian Splatting <br> for Feed-Forward Synthesis </h2>
+  <h4 align="center"> <b>ECCV 2026</b> </h4>
   <h3 align="center">
     <a href="https://cvlab-uos.github.io/ViewSplat/">Project Page</a> |
     <a href="https://arxiv.org/abs/2603.25265">Paper</a>
@@ -152,7 +151,7 @@ This project is built upon [SPFSplatV2](https://github.com/ranrhuang/SPFSplatV2)
 
 ```
 @article{Jeong2026viewsplat,
-      title={ViewSplat: View-Adaptive Dynamic Gaussian Splatting for Feed-Forward Synthesis},
+      title={ViewSplat: View-Adaptive 3D Gaussian Splatting for Feed-Forward Synthesis},
       author={Jeong, Moonyeon and Min, Seunggi and Lee, Suhyeon and Seong, Hongje},
       journal={arXiv preprint arXiv: 2603.25265},
       year={2026}
