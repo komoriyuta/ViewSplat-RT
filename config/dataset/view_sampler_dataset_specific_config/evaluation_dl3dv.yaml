@@ -1,0 +1,6 @@
+# @package _global_
+
+dataset:
+  dl3dv:
+    view_sampler:
+      index_path: assets/evaluation_index_dl3dv.json
