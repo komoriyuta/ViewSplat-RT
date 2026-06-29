@@ -251,6 +251,38 @@ class ModelWrapper(LightningModule):
 
         return refined_gaussians, offset_only_gaussians
 
+    # For reprojection loss ablation (Compute reprojection loss with refined Gaussian centers)
+    # def get_refined_pts3d(self, encoder_output, target_pose, h, w):
+    #     if "vd_mlp_params" not in encoder_output:
+    #         return None
+
+    #     vd_params = encoder_output["vd_mlp_params"]
+    #     V_cxt = vd_params.shape[1]
+    #     S = self.encoder.cfg.num_surfaces
+
+    #     vd_params_5d = rearrange(vd_params, "b v (h w) c -> b v c h w", h=h, w=w)
+    #     pts3d_flat = rearrange(encoder_output["raw_data"]["pts3d"], "b v n s d -> b (v n s) d")
+
+    #     vd_input = self.encoder.get_relative_pose_input(target_pose, pts3d_flat.unsqueeze(1))
+    #     vd_input_aligned = rearrange(vd_input.squeeze(1), "b (v n s) d -> b v n s d", v=V_cxt, s=S)
+    #     vd_input_final = vd_input_aligned[:, :, :, 0, :]
+
+    #     offset = self.encoder.compute_view_dependent_offset(
+    #         vd_params_5d,
+    #         vd_input_final,
+    #         encoder_output["vd_mlp_dims"],
+    #     )
+
+    #     means_offset = offset[..., :3].unsqueeze(-2)
+    #     refined_pts3d = encoder_output["raw_data"]["pts3d"] + means_offset
+
+    #     return rearrange(
+    #         refined_pts3d,
+    #         "b v (h w) s xyz -> b v h w s xyz",
+    #         h=h,
+    #         w=w,
+    #     ).squeeze(-2)
+
     def training_step(self, batch, batch_idx):
         # combine batch from different dataloaders
         if isinstance(batch, list):
@@ -358,6 +390,12 @@ class ModelWrapper(LightningModule):
                 if loss_fn.name == 'reproj':
                     if 'means' in visualization_dump:
                         pts3d = visualization_dump['means'].squeeze(-2) #  (b, v, h, w, 3)
+                        # raw_pts3d = visualization_dump["means"].squeeze(-2) #  (b, v, h, w, 3)
+
+                        # curr_target_ext = target_extrinsics[:, 0:1]
+                        # pts3d = self.get_refined_pts3d(encoder_output, curr_target_ext, h, w)
+                        # if pts3d is None:
+                        #     pts3d = raw_pts3d
 
                         if self.encoder.cfg.name == 'spf_viewsplat':
                             c1_loss = loss_fn.forward(pts3d[:,0], pred_extrinsics_cwt[:,0], context_intrinsics[:,0], self.global_step)
