@@ -12,7 +12,7 @@
   </a>
 </p>
 <p align="center">
-<strong>ViewSplat</strong> dynamically refines Gaussian attributes based on the target pose. <br> This allows for superior reconstruction of fine-grained details.
+<strong>ViewSplat</strong> refines Gaussian attributes based on the target pose on-the-fly. <br> This allows for superior reconstruction of fine-grained details.
 </p>
 <br>
 
