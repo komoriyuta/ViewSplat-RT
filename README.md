@@ -8,7 +8,7 @@
 </p>
 <p align="center">
   <a href="">
-    <img src="https://cvlab-uos.github.io/ViewSplat/static/images/intro_figure.png" alt="Overview of ViewSplat" width="90%">
+    <img src="https://cvlab-uos.github.io/ViewSplat/static/images/intro_figure_v2.png" alt="Overview of ViewSplat" width="90%">
   </a>
 </p>
 <p align="center">
