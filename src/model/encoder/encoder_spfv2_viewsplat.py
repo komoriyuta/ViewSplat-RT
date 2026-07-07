@@ -66,6 +66,8 @@ class EncoderSPFV2_ViewSplatCfg:
     pose_head_type: str = 'mlp'
     estimating_focal: bool = False
     estimating_pose: bool = True
+    fast_inference: bool = True
+    skip_view_dependent_head_in_fast_inference: bool = True
     
 
 
@@ -196,49 +198,58 @@ class EncoderSPFV2_ViewSplat(Encoder[EncoderSPFV2_ViewSplatCfg]):
         device = context["image"].device
         b, v_cxt, _, h, w = context["image"].shape
 
-        if target is not None:
-            v_tgt = target["image"].shape[1]
-            context_target = {
-                "image": normalize_image(torch.cat([context["image"], target["image"]], dim=1)),
-                "intrinsics": torch.cat([context["intrinsics"], target["intrinsics"]], dim=1),
-            }
-            # Encode the context and target images.
-            out = self.backbone(context_target, target_num_views=v_tgt)
-        else:
-            v_tgt = 0
-            context_input = {
-                "image": normalize_image(context["image"]),
-                "intrinsics": context["intrinsics"],
-            }
-            # Encode the context images.
-            out = self.backbone(context_input)
-            
-        dec_feat, shape, images = out['dec_feat'], out['shape'], out['images']
+        use_fast_inference = (
+            self.cfg.fast_inference
+            and not self.training
+            and device.type == "cuda"
+        )
 
-        
-        with torch.amp.autocast('cuda', enabled=False):
+        with torch.amp.autocast('cuda', dtype=torch.float16, enabled=use_fast_inference):
+            if target is not None:
+                v_tgt = target["image"].shape[1]
+                context_target = {
+                    "image": normalize_image(torch.cat([context["image"], target["image"]], dim=1)),
+                    "intrinsics": torch.cat([context["intrinsics"], target["intrinsics"]], dim=1),
+                }
+                # Encode the context and target images.
+                out = self.backbone(context_target, target_num_views=v_tgt)
+            else:
+                v_tgt = 0
+                context_input = {
+                    "image": normalize_image(context["image"]),
+                    "intrinsics": context["intrinsics"],
+                }
+                # Encode the context images.
+                out = self.backbone(context_input)
+
+            dec_feat, shape, images = out['dec_feat'], out['shape'], out['images']
+
             all_mean_res = []
             all_other_params = []
             all_vd_params = []
 
             if self.cfg.estimating_pose:
                 all_pose_params = []
-            
 
-            res1 = self._downstream_head(1, [tok[:, 0].float() for tok in dec_feat], shape[:, 0])
+            def select_view_tokens(tokens, view):
+                if use_fast_inference:
+                    return [tok[:, view] for tok in tokens]
+                return [tok[:, view].float() for tok in tokens]
+
+            res1 = self._downstream_head(1, select_view_tokens(dec_feat, 0), shape[:, 0])
             all_mean_res.append(res1)
             for i in range(1, v_cxt):
-                res2 = self._downstream_head(2, [tok[:, i].float() for tok in dec_feat], shape[:, i])
+                res2 = self._downstream_head(2, select_view_tokens(dec_feat, i), shape[:, i])
                 all_mean_res.append(res2)
 
 
             # for the 3DGS heads
             if 'dpt' in self.gs_params_head_type:
-                GS_res1 = self.gaussian_param_head([tok[:, 0].float() for tok in dec_feat], images[:, 0, :3], shape[0, 0].cpu().tolist())
+                GS_res1 = self.gaussian_param_head(select_view_tokens(dec_feat, 0), images[:, 0, :3], shape[0, 0].cpu().tolist())
                 GS_res1 = rearrange(GS_res1, "b d h w -> b (h w) d")
                 all_other_params.append(GS_res1)
                 for i in range(1, v_cxt):
-                    GS_res2 = self.gaussian_param_head2([tok[:, i].float() for tok in dec_feat], images[:, i, :3], shape[0, i].cpu().tolist())
+                    GS_res2 = self.gaussian_param_head2(select_view_tokens(dec_feat, i), images[:, i, :3], shape[0, i].cpu().tolist())
                     GS_res2 = rearrange(GS_res2, "b d h w -> b (h w) d")
                     all_other_params.append(GS_res2)
             else:
@@ -246,22 +257,25 @@ class EncoderSPFV2_ViewSplat(Encoder[EncoderSPFV2_ViewSplatCfg]):
 
             # View dependent head (context only)
             all_vd_params = []
-            if self.cfg.use_view_dependent_head:
-                vd_params1 = self.view_dependent_head([tok[:, 0].float() for tok in dec_feat], images[:, 0, :3], shape[0, 0].cpu().tolist())
+            compute_view_dependent_head = self.cfg.use_view_dependent_head and not (
+                use_fast_inference and self.cfg.skip_view_dependent_head_in_fast_inference
+            )
+            if compute_view_dependent_head:
+                vd_params1 = self.view_dependent_head(select_view_tokens(dec_feat, 0), images[:, 0, :3], shape[0, 0].cpu().tolist())
                 # vd_params1 shape: [B, total_params, H, W]
                 all_vd_params.append(rearrange(vd_params1, "b c h w -> b (h w) c"))
                 for i in range(1, v_cxt):
-                    vd_params2 = self.view_dependent_head2([tok[:, i].float() for tok in dec_feat], images[:, i, :3], shape[0, i].cpu().tolist())
+                    vd_params2 = self.view_dependent_head2(select_view_tokens(dec_feat, i), images[:, i, :3], shape[0, i].cpu().tolist())
                     all_vd_params.append(rearrange(vd_params2, "b c h w -> b (h w) c"))
            
             # for pose head
             if self.cfg.estimating_pose:
                 pose_feat = dec_feat if 'pose_feat' not in out else out['pose_feat']
                 # print("pose_feat", pose_feat[-1].shape)
-                pose_res1 = self.pose_head([tok[:, 0].float() for tok in pose_feat], shape[0, 0].cpu().tolist()) # (16, 9)
+                pose_res1 = self.pose_head(select_view_tokens(pose_feat, 0), shape[0, 0].cpu().tolist()) # (16, 9)
                 all_pose_params.append(pose_res1)
                 for i in range(1, v_cxt + v_tgt):
-                    pose_res2 = self.pose_head2([tok[:, i].float() for tok in pose_feat], shape[0, i].cpu().tolist()) # (16, 9)
+                    pose_res2 = self.pose_head2(select_view_tokens(pose_feat, i), shape[0, i].cpu().tolist()) # (16, 9)
                     all_pose_params.append(pose_res2)  
 
             
@@ -271,14 +285,19 @@ class EncoderSPFV2_ViewSplat(Encoder[EncoderSPFV2_ViewSplatCfg]):
         
         if self.cfg.estimating_pose:
             poses_enc = torch.stack(all_pose_params, dim=1) # (b, v 9)
-            pred_extrinsics = self.process_pose(poses_enc, v_cxt) # (b, v, 4, 4)
+            pred_extrinsics = self.process_pose(poses_enc.float(), v_cxt) # (b, v, 4, 4)
 
        
         pts_all = [all_mean_res_i['pts3d'] for all_mean_res_i in all_mean_res]
         pts_all = torch.stack(pts_all, dim=1) # [b, v, h, w, 3]
         pts_all = rearrange(pts_all, "b v h w xyz -> b v (h w) xyz")
         extrinsics = pred_extrinsics[:, :v_cxt] if self.cfg.estimating_pose else context["extrinsics"]
-        depths_per_view = self.process_depth(extrinsics, rearrange(pts_all, "b v (h w) xyz -> b v h w xyz", h=h, w=w)) # depth for each cam, (b, v, h, w)
+        depths_per_view = None
+        if visualization_dump is not None:
+            depths_per_view = self.process_depth(
+                extrinsics.float(),
+                rearrange(pts_all.float(), "b v (h w) xyz -> b v h w xyz", h=h, w=w),
+            ) # depth for each cam, (b, v, h, w)
         
 
         gaussians = rearrange(gaussians, "... (srf c) -> ... srf c", srf=self.cfg.num_surfaces) # for cfg.num_surfaces
@@ -327,30 +346,30 @@ class EncoderSPFV2_ViewSplat(Encoder[EncoderSPFV2_ViewSplatCfg]):
             rearrange(
                 gaussians.means,
                 "b v r srf spp xyz -> b (v r srf spp) xyz",
-            ),
+            ).float(),
             rearrange(
                 gaussians.covariances,
                 "b v r srf spp i j -> b (v r srf spp) i j",
-            ),
+            ).float(),
             rearrange(
                 gaussians.rotations,
                 "b v r srf spp i  -> b (v r srf spp) i ",
-            ),
+            ).float(),
             rearrange(
                 gaussians.scales,
                 "b v r srf spp i  -> b (v r srf spp) i ",
-            ),
+            ).float(),
             rearrange(
                 gaussians.harmonics,
                 "b v r srf spp c d_sh -> b (v r srf spp) c d_sh",
-            ),
+            ).float(),
             rearrange(
                 gaussians.opacities,
                 "b v r srf spp -> b (v r srf spp)",
-            )
+            ).float()
         )
 
-        if self.cfg.use_view_dependent_head:
+        if len(all_vd_params) > 0:
             encoder_output["vd_mlp_params"] = torch.stack(all_vd_params, dim=1) # [B, V_cxt, N, total_params]
             encoder_output["vd_mlp_dims"] = self.vd_mlp_dims
 
@@ -394,10 +413,21 @@ class EncoderSPFV2_ViewSplat(Encoder[EncoderSPFV2_ViewSplatCfg]):
 
         if self.cfg.pose_make_relative:
             base_context_pose = poses[:,0] # [b, 4, 4]
-            inv_base_context_pose = torch.inverse(base_context_pose)
+            inv_base_context_pose = self.invert_rigid_transform(base_context_pose)
             poses = inv_base_context_pose[:, None, :, :] @ poses # [b,1,4,4] @ [b,v,4,4]
 
         return poses      
+
+    @staticmethod
+    def invert_rigid_transform(transform):
+        inverse = torch.empty_like(transform)
+        rotation_inv = transform[:, :3, :3].transpose(-1, -2)
+        translation_inv = -(rotation_inv @ transform[:, :3, 3:4]).squeeze(-1)
+        inverse[:, :3, :3] = rotation_inv
+        inverse[:, :3, 3] = translation_inv
+        inverse[:, 3, :3] = 0
+        inverse[:, 3, 3] = 1
+        return inverse
     
     def process_depth(self, pose, pts3d):
         b, v, h, w, _ = pts3d.shape

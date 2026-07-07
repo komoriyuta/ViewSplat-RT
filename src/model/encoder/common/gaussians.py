@@ -3,8 +3,6 @@ from einops import rearrange
 from jaxtyping import Float
 from torch import Tensor
 
-
-# https://github.com/facebookresearch/pytorch3d/blob/main/pytorch3d/transforms/rotation_conversions.py
 def quaternion_to_matrix(
     quaternions: Float[Tensor, "*batch 4"],
     eps: float = 1e-8,

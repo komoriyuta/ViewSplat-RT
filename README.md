@@ -1,159 +1,179 @@
-<p align="center">
-  <h2 align="center"> ViewSplat: View-Adaptive 3D Gaussian Splatting <br> for Feed-Forward Synthesis </h2>
-  <h4 align="center"> <b>ECCV 2026</b> </h4>
-  <h3 align="center">
-    <a href="https://cvlab-uos.github.io/ViewSplat/">Project Page</a> |
-    <a href="https://arxiv.org/abs/2603.25265">Paper</a>
-  </h3>
-</p>
-<p align="center">
-  <a href="">
-    <img src="https://cvlab-uos.github.io/ViewSplat/static/images/intro_figure_v2.png" alt="Overview of ViewSplat" width="90%">
-  </a>
-</p>
-<p align="center">
-<strong>ViewSplat</strong> refines Gaussian attributes based on the target-view pose on the fly. <br> This allows for superior reconstruction of fine-grained details.
-</p>
-<br>
+# ViewSplat-RT
 
-**ViewSplat** is built upon the foundational work of [SPFSplatV2](https://github.com/ranrhuang/SPFSplatV2).
+## Real-Time Version of the Original ViewSplat Repository
 
-<!-- TABLE OF CONTENTS -->
-<details open="open" style='padding: 10px; border-radius:5px 30px 30px 5px; border-style: solid; border-width: 1px;'>
-  <summary>Table of Contents</summary>
-  <ol>
-    <li>
-      <a href="#installation">Installation</a>
-    </li>
-    <li>
-      <a href="#pre-trained-checkpoints">Pre-trained Checkpoints</a>
-    </li>
-    <li>
-      <a href="#datasets">Datasets</a>
-    </li>
-    <li>
-      <a href="#running-the-code">Running the Code</a>
-    </li>
-    <li>
-      <a href="#camera-conventions">Camera Conventions</a>
-    </li>
-    <li>
-      <a href="#acknowledgements">Acknowledgements</a>
-    </li>
-    <li>
-      <a href="#citation">Citation</a>
-    </li>
-</ol>
-</details>
+This repository makes the original **ViewSplat** paper implementation run as a real-time two-camera inference system. It is not a separate model or a rewrite from scratch; it is the original ViewSplat implementation adapted for live cameras, real-time 3DGS generation, CUDA rendering, and browser/OpenCV visualization.
+
+- Original repository: https://github.com/cvlab-uos/ViewSplat
+- Original project page: https://cvlab-uos.github.io/ViewSplat/
+- Original paper: https://arxiv.org/abs/2603.25265
+
+ViewSplat-RT keeps the ViewSplat model code and makes the paper implementation usable as a live real-time pipeline: `uv`/`pyproject.toml` setup, optimized SPFSplatV2 inference, live two-camera input, CUDA Gaussian rendering, OpenCV preview, and Viser browser streaming.
+
+On an RTX 4060 Ti 16GB, the optimized real-time path reaches about **20 FPS** with the SPFSplatV2 preset.
+
+<p align="center">
+  <video src="demo_video/realtime_demo.mp4" width="90%" controls muted playsinline></video>
+</p>
+<p align="center">
+  <a href="demo_video/realtime_demo.mp4">Open demo video</a>
+</p>
+
+## What Was Added for Real Time
+
+- `uv` based environment setup through `pyproject.toml` and `uv.lock`
+- Real-time two-camera inference entrypoint: `src.realtime_two_camera`
+- Automatic checkpoint download from Hugging Face
+- OpenCV raw camera preview with `--show-cameras`
+- CUDA-rendered midpoint/virtual camera preview with `--show`
+- Viser browser streaming with `--viser`
+- Camera sweep between the two estimated cameras with `--sweep`
+- Presets for RE10K/ACID and SPFSplatV2/SPFSplatV2-L checkpoints
+- Vendored `third_party` checkout removed; `diff_gauss_pose` is prepared from the original upstream dependency by a local script, then installed by `uv` from `pyproject.toml`
 
 ## Installation
 
-1. Clone ViewSplat.
-```bash
-git clone git@github.com:cvlab-uos/ViewSplat.git
-cd ViewSplat
-```
-
-2. Create the environment, here we show an example using conda.
-```bash
-conda create -n viewsplat python=3.11
-conda activate viewsplat
-
-conda install -c conda-forge ninja gcc=11 gxx=11
-conda install -c conda-forge mkl=2023.1.0 intel-openmp
-conda install -c conda-forge mkl-service mkl_fft mkl_random
-conda install -c "nvidia/label/cuda-12.1.0" cuda-toolkit
-conda install pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia
-
-pip install "diff_gauss_pose @ git+https://github.com/slothfulxtx/diff-gaussian-rasterization.git@pose" --no-build-isolation
-pip install "git+https://github.com/facebookresearch/pytorch3d.git@055ab3a2e3e611dff66fa82f632e62a315f3b5e7" --no-build-isolation
-
-pip install --no-cache-dir --no-build-isolation -r requirements.txt
-```
-
-## Pre-trained Checkpoints
-Our models are hosted on [Hugging Face](https://huggingface.co/myeon01/ViewSplat)
-
-|                                                    Model name                                              | Training data | Training settings |
-|:----------------------------------------------------------------------------------------------------------:|:-------------:|:-------------:|
-| [re10k_spf_viewsplat.ckpt](https://huggingface.co/myeon01/ViewSplat/resolve/main/re10k_spf_viewsplat.ckpt) | RE10K | 2 views, SPFSplat-based |
-| [acid_spf_viewsplat.ckpt](https://huggingface.co/myeon01/ViewSplat/resolve/main/acid_spf_viewsplat.ckpt) | ACID | 2 views, SPFSplat-based |
-| [re10k_spfv2_viewsplat.ckpt](https://huggingface.co/myeon01/ViewSplat/resolve/main/re10k_spfv2_viewsplat.ckpt) | RE10K | 2 views, SPFSplatV2-based |
-| [acid_spfv2_viewsplat.ckpt](https://huggingface.co/myeon01/ViewSplat/resolve/main/acid_spfv2_viewsplat.ckpt) | ACID | 2 views, SPFSplatV2-based |
-| [re10k_spfv2l_viewsplat.ckpt](https://huggingface.co/myeon01/ViewSplat/resolve/main/re10k_spfv2l_viewsplat.ckpt) | RE10K | 2 views, SPFSplatV2-L-based |
-| [acid_spfv2l_viewsplat.ckpt](https://huggingface.co/myeon01/ViewSplat/resolve/main/acid_spfv2l_viewsplat.ckpt) | ACID | 2 views, SPFSplatV2-L-based |
-
-We assume the downloaded weights are located in the `pretrained_weights` directory.
-
-## Datasets
-Please refer to [DATASETS.md](DATASETS.md) for dataset preparation.
-
-## Running the Code
-### Training
-1. Download the following pre-trained checkpoints and place them in the `./pretrained_weights` directory:
-
-| Model | Source |
-| :---: | :---: |
-| **SPFSplat** | [Hugging Face](https://huggingface.co/RanranHuang/SPFSplat/tree/main) |
-| **SPFSplatV2** | [Hugging Face](https://huggingface.co/RanranHuang/SPFSplatV2/tree/main) |
+Clone this fork:
 
 ```bash
-mkdir -p pretrained_weights
-# After downloading, your directory should look like this:
-# ViewSplat/
-# └── pretrained_weights/
-#     ├── re10k_spfsplat.ckpt
-#     ├── re10k_spfsplatv2l.ckpt
-#     └── acid_spfsplatv2l.ckpt
+git clone https://github.com/komoriyuta/ViewSplat-RT.git
+cd ViewSplat-RT
 ```
 
-2. Train with:
+Prepare the original `diff_gauss_pose` dependency, then create the environment:
 
 ```bash
-# 2 view on RealEstate10K, SPFSplat-based architecture (Geometry Transformer: MASt3R)
-python -m src.main +experiment=spf_viewsplat/re10k wandb.mode=online wandb.name=re10k_spf_viewsplat
-
-# 2 view on RealEstate10K, SPFSplatV2-L-based architecture (Geometry Transformer: VGGT)
-python -m src.main +experiment=spfv2l_viewsplat/re10k wandb.mode=online wandb.name=re10k_spfv2l_viewsplat
-
-# 2 view on ACID, SPFSplatV2-L-based architecture (Geometry Transformer: VGGT)
-python -m src.main +experiment=spfv2l_viewsplat/acid wandb.mode=online wandb.name=acid_spfv2l_viewsplat
+python3 scripts/prepare_diff_gauss_pose.py
+CUDA_HOME=/usr/local/cuda-13.2 PATH=/usr/local/cuda-13.2/bin:$PATH uv sync --no-dev
 ```
 
-### Evaluation
-#### Novel View Synthesis
+The project uses Python 3.11. PyTorch is installed from the CUDA 13.0 wheel index. The CUDA Gaussian rasterizer is the original `diff_gauss_pose` dependency from `slothfulxtx/diff-gaussian-rasterization@pose`; `scripts/prepare_diff_gauss_pose.py` clones the pinned upstream revision into ignored `.uv-local/`, adds the minimal build metadata needed by `uv`, and applies the CUDA 13/C++20 compatibility include. There is no checked-in `third_party` directory.
+
+## Real-Time Two-Camera Inference
+
+List available cameras:
+
 ```bash
-# 2 view on RealEstate10K, SPFSplatV2-L-based architecture
-python -m src.main +experiment=spfv2l_viewsplat/re10k mode=test wandb.name=re10k_spfv2l_viewsplat_test \
-  dataset/view_sampler@dataset.re10k.view_sampler=evaluation \
-  dataset.re10k.view_sampler.index_path=assets/evaluation_index_re10k.json \
-  checkpointing.load=./pretrained_weights/re10k_spfv2l_viewsplat.ckpt \
-  test.save_image=true test.with_offset_only=true
-
-# 2 view on ACID, SPFSplatV2-L-based architecture
-python -m src.main +experiment=spfv2l_viewsplat/acid mode=test wandb.name=acid_spfv2l_viewsplat_test \
-  dataset/view_sampler@dataset.re10k.view_sampler=evaluation \
-  dataset.re10k.view_sampler.index_path=assets/evaluation_index_acid.json \
-  checkpointing.load=./pretrained_weights/acid_spfv2l_viewsplat.ckpt \
-  test.save_image=true test.with_offset_only=true
+uv run python -m src.realtime_two_camera --list-cameras
 ```
 
+Run two-camera inference with browser visualization:
+
+```bash
+uv run python -m src.realtime_two_camera \
+  --left-camera 1 \
+  --right-camera 3 \
+  --preset re10k-spfv2 \
+  --viser
+```
+
+Show the raw left/right camera streams:
+
+```bash
+uv run python -m src.realtime_two_camera \
+  --left-camera 1 \
+  --right-camera 3 \
+  --preset re10k-spfv2 \
+  --show-cameras
+```
+
+Show the CUDA-rendered virtual camera image in OpenCV:
+
+```bash
+uv run python -m src.realtime_two_camera \
+  --left-camera 1 \
+  --right-camera 3 \
+  --preset re10k-spfv2 \
+  --show
+```
+
+Sweep the virtual camera between the two estimated cameras:
+
+```bash
+uv run python -m src.realtime_two_camera \
+  --left-camera 1 \
+  --right-camera 3 \
+  --preset re10k-spfv2 \
+  --viser \
+  --sweep \
+  --sweep-period 1.0
+```
+
+Use the Large ACID preset:
+
+```bash
+uv run python -m src.realtime_two_camera \
+  --left-camera 1 \
+  --right-camera 3 \
+  --preset acid-spfv2l \
+  --viser
+```
+
+## Presets
+
+| Preset | Checkpoint | Notes |
+| :--- | :--- | :--- |
+| `re10k-spfv2` | `re10k_spfv2_viewsplat.ckpt` | Default real-time preset |
+| `acid-spfv2` | `acid_spfv2_viewsplat.ckpt` | ACID SPFSplatV2 |
+| `re10k-spfv2l` | `re10k_spfv2l_viewsplat.ckpt` | Large VGGT-backed model |
+| `acid-spfv2l` | `acid_spfv2l_viewsplat.ckpt` | Large ACID model |
+
+Missing checkpoints are downloaded automatically into `pretrained_weights`.
+
+## Useful Options
+
+```bash
+--show-cameras              Show raw left/right camera frames
+--show                      Show CUDA-rendered virtual camera output
+--viser                     Stream CUDA-rendered output to Viser
+--viser-port 8080           Viser server port
+--viser-jpeg-quality 75     JPEG quality for browser streaming
+--viser-stream-scale 2      CPU upscale before Viser JPEG streaming
+--sweep                     Sweep virtual camera between the two cameras
+--sweep-period 1.0          Sweep period in seconds
+--disable-view-dependent-head
+                            Optional speed/quality tradeoff for SPFSplatV2-L
+```
+
+## Evaluation
+
+The original evaluation path is still available. For example:
+
+```bash
+uv run python -m src.main +experiment=spfv2_viewsplat/re10k_eval
+```
+
+The default evaluation command uses:
+
+```text
+pretrained_weights/re10k_spfv2_viewsplat.ckpt
+```
 
 ## Camera Conventions
-We follow the [pixelSplat](https://github.com/dcharatan/pixelsplat) camera system. The camera intrinsic matrices are normalized (the first row is divided by image width, and the second row is divided by image height).
-The camera extrinsic matrices are OpenCV-style camera-to-world matrices ( +X right, +Y down, +Z camera looks into the screen).
 
-## Acknowledgements
-This project is built upon [SPFSplatV2](https://github.com/ranrhuang/SPFSplatV2) by Ranran Huang. We thank the authors for their excellent work.
+This fork follows the original ViewSplat/pixelSplat camera convention. Intrinsics are normalized by image size. Extrinsics are OpenCV-style camera-to-world matrices: `+X` right, `+Y` down, `+Z` forward.
 
+## Attribution
+
+This is a real-time inference fork of the original ViewSplat implementation by the ViewSplat authors:
+
+- https://github.com/cvlab-uos/ViewSplat
+- https://cvlab-uos.github.io/ViewSplat/
+- https://arxiv.org/abs/2603.25265
+
+ViewSplat builds on SPFSplatV2:
+
+- https://github.com/ranrhuang/SPFSplatV2
 
 ## Citation
 
-```
+If you use the ViewSplat model or paper implementation, cite the original ViewSplat work:
+
+```bibtex
 @article{Jeong2026viewsplat,
-      title={ViewSplat: View-Adaptive 3D Gaussian Splatting for Feed-Forward Synthesis},
-      author={Jeong, Moonyeon and Min, Seunggi and Lee, Suhyeon and Seong, Hongje},
-      journal={arXiv preprint arXiv: 2603.25265},
-      year={2026}
+  title={ViewSplat: View-Adaptive 3D Gaussian Splatting for Feed-Forward Synthesis},
+  author={Jeong, Moonyeon and Min, Seunggi and Lee, Suhyeon and Seong, Hongje},
+  journal={arXiv preprint arXiv: 2603.25265},
+  year={2026}
 }
 ```

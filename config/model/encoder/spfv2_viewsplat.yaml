@@ -39,6 +39,8 @@ pose_head_type: mlp
 
 estimating_focal: false
 estimating_pose: true
+fast_inference: true
+skip_view_dependent_head_in_fast_inference: true
 
 
 pose_head:

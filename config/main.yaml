@@ -71,6 +71,11 @@ test:
   save_video: false
   save_compare: false
   with_offset_only: false
+  compile_encoder: false
+  compile_heads: true
+  compile_mode: default
+  channels_last: true
+  half_encoder: true
 
 seed: 111123
 

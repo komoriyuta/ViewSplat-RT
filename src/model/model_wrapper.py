@@ -72,6 +72,11 @@ class TestCfg:
     save_video: bool
     save_compare: bool
     with_offset_only: bool
+    compile_encoder: bool = False
+    compile_heads: bool = True
+    compile_mode: str = "reduce-overhead"
+    channels_last: bool = True
+    half_encoder: bool = True
 
 
 @dataclass
@@ -494,7 +499,7 @@ class ModelWrapper(LightningModule):
             print(f"Test step {batch_idx:0>6}.")
 
 
-        visualization_dump = {}
+        visualization_dump = {} if self.encoder.cfg.estimating_focal else None
 
         if self.encoder.cfg.estimating_pose:
             # Render Gaussians.
@@ -519,7 +524,7 @@ class ModelWrapper(LightningModule):
                     if self.test_cfg.with_offset_only:
                         gaussians, offset_only_gaussians = self.get_refined_gaussians(encoder_output, curr_target_ext, h, w)
                     else:
-                        gaussians, _ = self.get_refined_gaussians(encoder_output, curr_target_ext, h, w)
+                        gaussians = encoder_output["gaussians"]
                         offset_only_gaussians = None
 
                 if self.encoder.cfg.estimating_focal: 
@@ -578,7 +583,7 @@ class ModelWrapper(LightningModule):
                 if self.test_cfg.with_offset_only:
                     gaussians, offset_only_gaussians = self.get_refined_gaussians(encoder_output, curr_target_ext, h, w)
                 else:
-                    gaussians, _ = self.get_refined_gaussians(encoder_output, curr_target_ext, h, w)
+                    gaussians = encoder_output["gaussians"]
                     offset_only_gaussians = None
 
             if self.encoder.cfg.estimating_focal: 
@@ -1378,4 +1383,3 @@ class ModelWrapper(LightningModule):
             torch.nn.utils.clip_grad_norm_(self.parameters(), 0.5)
             optimizer.step()
             optimizer.zero_grad()
-

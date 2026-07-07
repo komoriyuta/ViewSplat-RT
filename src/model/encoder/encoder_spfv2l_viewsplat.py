@@ -64,6 +64,8 @@ class EncoderSPFV2L_ViewSplatCfg:
     
     estimating_focal: bool = False
     estimating_pose: bool = True
+    fast_inference: bool = True
+    skip_view_dependent_head_in_fast_inference: bool = False
 
     input_mean: tuple[float, float, float] = (0.5, 0.5, 0.5)
     input_std: tuple[float, float, float] = (0.5, 0.5, 0.5)
@@ -152,41 +154,53 @@ class EncoderSPFV2L_ViewSplat(Encoder[EncoderSPFV2L_ViewSplatCfg]):
         device = context["image"].device
         b, v_cxt, _, h, w = context["image"].shape
 
+        use_fast_inference = (
+            self.cfg.fast_inference
+            and not self.training
+            and device.type == "cuda"
+        )
 
-        if target is not None:
-            v_tgt = target["image"].shape[1]
-            context_target = {
-                "image": torch.cat([context["image"], target["image"]], dim=1),
-                "intrinsics": torch.cat([context["intrinsics"], target["intrinsics"]], dim=1)
-            }
-            # Encode the context and target images.
-            aggregated_tokens_list, ps_idx = self.backbone(context_target, target_num_views=v_tgt)
-        else:
-            v_tgt = 0
-            aggregated_tokens_list, ps_idx = self.backbone(context, target_num_views=0)
-            
-        if self.cfg.estimating_pose:
-            camera_enc = self.backbone.model.camera_head(aggregated_tokens_list)[-1] # [b, v, 9]
-            extri, _ = pose_encoding_to_extri_intri(camera_enc, context["image"].shape[-2:])
+        with torch.amp.autocast("cuda", dtype=torch.float16, enabled=use_fast_inference):
+            if target is not None:
+                v_tgt = target["image"].shape[1]
+                context_target = {
+                    "image": torch.cat([context["image"], target["image"]], dim=1),
+                    "intrinsics": torch.cat([context["intrinsics"], target["intrinsics"]], dim=1)
+                }
+                # Encode the context and target images.
+                aggregated_tokens_list, ps_idx = self.backbone(context_target, target_num_views=v_tgt)
+            else:
+                v_tgt = 0
+                aggregated_tokens_list, ps_idx = self.backbone(context, target_num_views=0)
+                
             if self.cfg.estimating_pose:
-                pred_extrinsics = self.process_pose(extri, v_cxt)
-               
+                camera_enc = self.backbone.model.camera_head(aggregated_tokens_list)[-1] # [b, v, 9]
+                extri, _ = pose_encoding_to_extri_intri(camera_enc.float(), context["image"].shape[-2:])
+                if self.cfg.estimating_pose:
+                    pred_extrinsics = self.process_pose(extri, v_cxt)
+                
 
-        context_aggregated_tokens_list = []
-        for aggregated_tokens in aggregated_tokens_list:
-            context_aggregated_tokens_list.append(aggregated_tokens[:,:v_cxt].contiguous())
+            context_aggregated_tokens_list = []
+            for aggregated_tokens in aggregated_tokens_list:
+                context_aggregated_tokens_list.append(aggregated_tokens[:,:v_cxt].contiguous())
 
-        # Predict Point Maps
-        point_map, _ = self.backbone.model.point_head(context_aggregated_tokens_list, context["image"], ps_idx) # [b, v, h, w, 3]
-        # print("point_map", point_map.shape)
-        pts_all = rearrange(point_map, "b v h w xyz -> b v (h w) xyz")
+            # Predict Point Maps
+            point_map, _ = self.backbone.model.point_head(context_aggregated_tokens_list, context["image"], ps_idx) # [b, v, h, w, 3]
+            # print("point_map", point_map.shape)
+            pts_all = rearrange(point_map, "b v h w xyz -> b v (h w) xyz")
         extrinsics = pred_extrinsics[:, :v_cxt] if self.cfg.estimating_pose else context["extrinsics"]
-        depths_per_view = self.process_depth(extrinsics, rearrange(pts_all, "b v (h w) xyz -> b v h w xyz", h=h, w=w)) # depth for each cam, (b, v, h, w)
+        depths_per_view = None
+        if visualization_dump is not None:
+            depths_per_view = self.process_depth(
+                extrinsics.float(),
+                rearrange(pts_all.float(), "b v (h w) xyz -> b v h w xyz", h=h, w=w),
+            ) # depth for each cam, (b, v, h, w)
 
         
 
         # Predict gaussians 
-        gs_map = self.gaussian_param_head(context_aggregated_tokens_list, context["image"], ps_idx) # [b, v, h, w, 83]
+        with torch.amp.autocast("cuda", dtype=torch.float16, enabled=use_fast_inference):
+            gs_map = self.gaussian_param_head(context_aggregated_tokens_list, context["image"], ps_idx) # [b, v, h, w, 83]
         gaussians = rearrange(gs_map, "b v h w c -> b v (h w) c") 
         gaussians = rearrange(gaussians, "... (srf c) -> ... srf c", srf=self.cfg.num_surfaces) # for cfg.num_surfaces
         raw_densities = gaussians[..., 0]
@@ -196,10 +210,14 @@ class EncoderSPFV2L_ViewSplat(Encoder[EncoderSPFV2L_ViewSplatCfg]):
 
         # Predict View Dependent Params (Optional)
         all_vd_params = []
-        if self.cfg.use_view_dependent_head:
+        compute_view_dependent_head = self.cfg.use_view_dependent_head and not (
+            use_fast_inference and self.cfg.skip_view_dependent_head_in_fast_inference
+        )
+        if compute_view_dependent_head:
             # DPTViewHead Forward
             # Output: [B, V, total_params, H, W]
-            vd_map = self.view_dependent_head(context_aggregated_tokens_list, context["image"], ps_idx)
+            with torch.amp.autocast("cuda", dtype=torch.float16, enabled=use_fast_inference):
+                vd_map = self.view_dependent_head(context_aggregated_tokens_list, context["image"], ps_idx)
             
             # Rearrange to [B, V, N, total_params]
             all_vd_params = rearrange(vd_map, "b v c h w -> b v (h w) c")
@@ -236,30 +254,30 @@ class EncoderSPFV2L_ViewSplat(Encoder[EncoderSPFV2L_ViewSplatCfg]):
             rearrange(
                 gaussians.means,
                 "b v r srf spp xyz -> b (v r srf spp) xyz",
-            ),
+            ).float(),
             rearrange(
                 gaussians.covariances,
                 "b v r srf spp i j -> b (v r srf spp) i j",
-            ),
+            ).float(),
             rearrange(
                 gaussians.rotations,
                 "b v r srf spp i  -> b (v r srf spp) i ",
-            ),
+            ).float(),
             rearrange(
                 gaussians.scales,
                 "b v r srf spp i  -> b (v r srf spp) i ",
-            ),
+            ).float(),
             rearrange(
                 gaussians.harmonics,
                 "b v r srf spp c d_sh -> b (v r srf spp) c d_sh",
-            ),
+            ).float(),
             rearrange(
                 gaussians.opacities,
                 "b v r srf spp -> b (v r srf spp)",
-            )
+            ).float()
         )
 
-        if self.cfg.use_view_dependent_head:
+        if compute_view_dependent_head:
             encoder_output["vd_mlp_params"] = all_vd_params
             encoder_output["vd_mlp_dims"] = self.vd_mlp_dims
 
@@ -272,9 +290,9 @@ class EncoderSPFV2L_ViewSplat(Encoder[EncoderSPFV2L_ViewSplatCfg]):
 
         if self.cfg.estimating_pose:
             encoder_output['extrinsics'] = dict()
-            encoder_output['extrinsics']['c'] = pred_extrinsics[:,:v_cxt]
+            encoder_output['extrinsics']['c'] = pred_extrinsics[:,:v_cxt].float()
             if target is not None:
-                encoder_output['extrinsics']['cwt'] = pred_extrinsics
+                encoder_output['extrinsics']['cwt'] = pred_extrinsics.float()
 
 
         

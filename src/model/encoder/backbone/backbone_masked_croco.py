@@ -276,26 +276,42 @@ class AsymmetricMaskedCroCoMulti(CroCoNet):
         ## ************ mask v2, more efficient ************
         for blk1, blk2 in zip(self.dec_blocks, self.dec_blocks2):
             feat_current = final_output[-1] # [b, v, l, c]
-            feat_current_ctx = generate_ctx_views(feat_current) # [b, v, (v-1), l, c]
-            # img1 side
-            f1, _ = blk1(feat_current[:, 0].contiguous(), feat_current_ctx[:, 0, :v-1-num_target].flatten(1,2).contiguous(), pos[:, 0].contiguous(), pos_ctx[:, 0, :v-1-num_target].flatten(1,2).contiguous())
-            f1 = f1.unsqueeze(1)
-            # img2 side
-            f2, _ = blk2(rearrange(feat_current[:, 1:v-num_target], "b v l c -> (b v) l c"),
-                         rearrange(feat_current_ctx[:, 1:v-num_target, :v-1-num_target].flatten(2,3), "b v l c -> (b v) l c"),
-                         rearrange(pos[:, 1:v-num_target].contiguous(), "b v l c -> (b v) l c"),
-                         rearrange(pos_ctx[:, 1:v-num_target, :v-1-num_target].flatten(2,3).contiguous(), "b v l c -> (b v) l c")
-                         )  
-            f2 = rearrange(f2, "(b v) l c -> b v l c", b=b, v=v-1-num_target)
+            if v == 2 and num_target == 0:
+                f1, _ = blk1(
+                    feat_current[:, 0].contiguous(),
+                    feat_current[:, 1].contiguous(),
+                    pos[:, 0].contiguous(),
+                    pos[:, 1].contiguous(),
+                )
+                f2, _ = blk2(
+                    feat_current[:, 1].contiguous(),
+                    feat_current[:, 0].contiguous(),
+                    pos[:, 1].contiguous(),
+                    pos[:, 0].contiguous(),
+                )
+                f1 = f1.unsqueeze(1)
+                f2 = f2.unsqueeze(1)
+            else:
+                feat_current_ctx = generate_ctx_views(feat_current) # [b, v, (v-1), l, c]
+                # img1 side
+                f1, _ = blk1(feat_current[:, 0].contiguous(), feat_current_ctx[:, 0, :v-1-num_target].flatten(1,2).contiguous(), pos[:, 0].contiguous(), pos_ctx[:, 0, :v-1-num_target].flatten(1,2).contiguous())
+                f1 = f1.unsqueeze(1)
+                # img2 side
+                f2, _ = blk2(rearrange(feat_current[:, 1:v-num_target], "b v l c -> (b v) l c"),
+                             rearrange(feat_current_ctx[:, 1:v-num_target, :v-1-num_target].flatten(2,3), "b v l c -> (b v) l c"),
+                             rearrange(pos[:, 1:v-num_target].contiguous(), "b v l c -> (b v) l c"),
+                             rearrange(pos_ctx[:, 1:v-num_target, :v-1-num_target].flatten(2,3).contiguous(), "b v l c -> (b v) l c")
+                             )
+                f2 = rearrange(f2, "(b v) l c -> b v l c", b=b, v=v-1-num_target)
 
-            if num_target > 0:
-                f2_tgt, _ = blk2(rearrange(feat_current[:, v-num_target:], "b v l c -> (b v) l c"),
-                            rearrange(feat_current_ctx[:, v-num_target:].flatten(2,3), "b v l c -> (b v) l c"),
-                            rearrange(pos[:, v-num_target:].contiguous(), "b v l c -> (b v) l c"),
-                            rearrange(pos_ctx[:, v-num_target:].flatten(2,3).contiguous(), "b v l c -> (b v) l c")
-                            )  
-                f2_tgt = rearrange(f2_tgt, "(b v) l c -> b v l c", b=b, v=num_target)
-                f2 = torch.cat([f2, f2_tgt], dim=1)
+                if num_target > 0:
+                    f2_tgt, _ = blk2(rearrange(feat_current[:, v-num_target:], "b v l c -> (b v) l c"),
+                                rearrange(feat_current_ctx[:, v-num_target:].flatten(2,3), "b v l c -> (b v) l c"),
+                                rearrange(pos[:, v-num_target:].contiguous(), "b v l c -> (b v) l c"),
+                                rearrange(pos_ctx[:, v-num_target:].flatten(2,3).contiguous(), "b v l c -> (b v) l c")
+                                )
+                    f2_tgt = rearrange(f2_tgt, "(b v) l c -> b v l c", b=b, v=num_target)
+                    f2 = torch.cat([f2, f2_tgt], dim=1)
 
             
             # store the result
@@ -341,6 +357,8 @@ class AsymmetricMaskedCroCoMulti(CroCoNet):
 
         # step 1: encoder input images
         images_all = rearrange(images_all, "b v c h w -> (b v) c h w")
+        if not self.training and images_all.is_cuda:
+            images_all = images_all.contiguous(memory_format=torch.channels_last)
         shape_all = torch.tensor(images_all.shape[-2:])[None].repeat(b*v, 1)
 
 

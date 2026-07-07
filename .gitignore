@@ -1,4 +1,6 @@
 *.sh
+.venv/
+.uv-local/
 outputs/
 checkpoints
 datasets
@@ -6,7 +8,11 @@ lightning_logs/
 pretrained_weights
 upload_weights.py
 *toml
-
+!pyproject.toml
+!uv.lock
+!src/model/encoder/backbone/croco/curope/pyproject.toml
+*.cache/
+*ckpt
 __pycache__/
 *.py[cod]
 *.pyo

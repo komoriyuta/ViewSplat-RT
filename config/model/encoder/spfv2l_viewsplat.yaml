@@ -37,6 +37,8 @@ pose_make_relative: true
 
 estimating_focal: false
 estimating_pose: true
+fast_inference: true
+skip_view_dependent_head_in_fast_inference: false
 
 use_view_dependent_head: true
 vd_mlp_hidden_dim: 16

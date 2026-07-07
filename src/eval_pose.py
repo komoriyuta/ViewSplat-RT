@@ -14,6 +14,7 @@ from src.misc.wandb_tools import update_checkpoint_path
 from src.model.decoder import get_decoder
 from src.model.encoder import get_encoder
 from src.misc.weight_modify import checkpoint_filter_fn
+from src.runtime import configure_torch_runtime
 
 # Configure beartype and jaxtyping.
 with install_import_hook(
@@ -44,6 +45,7 @@ class RootCfg:
     config_name="main",
 )
 def evaluate(cfg_dict: DictConfig):
+    configure_torch_runtime()
     cfg = load_typed_config(cfg_dict, RootCfg,
                             {list[LossCfgWrapper]: separate_loss_cfg_wrappers,
                              list[DatasetCfgWrapper]: separate_dataset_cfg_wrappers},)

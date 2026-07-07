@@ -1,11 +1,20 @@
 import cv2
 import numpy as np
 import torch
+import torch.nn.functional as F
 from jaxtyping import Float
 from torch import Tensor
 from einops import rearrange
 import traceback
-import pytorch3d.transforms as transforms
+
+
+def rotation_6d_to_matrix(d6: torch.Tensor) -> torch.Tensor:
+    a1, a2 = d6[..., :3], d6[..., 3:]
+    b1 = F.normalize(a1, dim=-1)
+    b2 = a2 - (b1 * a2).sum(-1, keepdim=True) * b1
+    b2 = F.normalize(b2, dim=-1)
+    b3 = torch.cross(b1, b2, dim=-1)
+    return torch.stack((b1, b2, b3), dim=-2)
 
 def decompose_extrinsic_RT(E: torch.Tensor):
     """
@@ -278,7 +287,7 @@ def convert_pose_to_4x4(out):
     out_t = out[:, 6:]
     device = out.device
 
-    out_r = transforms.rotation_6d_to_matrix(out_r)  # [N,3,3]
+    out_r = rotation_6d_to_matrix(out_r)  # [N,3,3]
     pose = torch.zeros((B, 4, 4), device=device)
     pose[:, :3, :3] = out_r
     pose[:, :3, 3] = out_t
@@ -316,5 +325,4 @@ def depth_projector(pts3d, im_poses):
     camera_coords = torch.einsum("bij, bnj -> bni", im_poses[:, :3, :3], pts3d) + im_poses[:, None, :3, 3] # [b, n, 3]
 
     return camera_coords[..., 2, None]
-
 

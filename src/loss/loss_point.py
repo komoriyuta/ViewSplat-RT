@@ -4,7 +4,6 @@ from copy import copy, deepcopy
 
 from ..geometry.ptc_geometry import geotrf, inv, normalize_pointcloud, depthmap_to_pts3d
 # from torchmetrics.functional.regression import pearson_corrcoef
-# from pytorch3d.loss import chamfer_distance
 
 
 def get_pred_pts3d(gt, pred, use_pose=False):
@@ -355,4 +354,3 @@ class Regr3D(nn.Module):
     #     # conf_loss2 = conf_loss2.mean() if conf_loss2.numel() > 0 else 0
     #     #
     #     # return conf_loss1 + conf_loss2
-

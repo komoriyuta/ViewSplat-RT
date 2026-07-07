@@ -19,6 +19,7 @@ import time
 
 from src.misc.weight_modify import checkpoint_filter_fn
 from src.model.distiller import get_distiller
+from src.runtime import configure_torch_runtime
 
 # Configure beartype and jaxtyping.
 with install_import_hook(
@@ -55,6 +56,7 @@ class IterationTimer(Callback):
     config_name="main",
 )
 def train(cfg_dict: DictConfig):
+    configure_torch_runtime()
     cfg = load_typed_root_config(cfg_dict)
     set_cfg(cfg_dict)
     print(cfg)
@@ -205,6 +207,37 @@ def train(cfg_dict: DictConfig):
     else:
         model_wrapper = ModelWrapper(**model_kwargs)
 
+    if cfg.mode == "test" and cfg.test.channels_last:
+        model_wrapper.encoder = model_wrapper.encoder.to(memory_format=torch.channels_last)
+        model_wrapper.decoder = model_wrapper.decoder.to(memory_format=torch.channels_last)
+
+    if cfg.mode == "test" and cfg.test.half_encoder:
+        model_wrapper.encoder = model_wrapper.encoder.half()
+
+    if cfg.mode == "test" and cfg.test.compile_heads:
+        for name in (
+            "downstream_head1",
+            "downstream_head2",
+            "gaussian_param_head",
+            "gaussian_param_head2",
+        ):
+            if hasattr(model_wrapper.encoder, name):
+                setattr(
+                    model_wrapper.encoder,
+                    name,
+                    torch.compile(
+                        getattr(model_wrapper.encoder, name),
+                        mode=cfg.test.compile_mode,
+                        fullgraph=False,
+                    ),
+                )
+
+    if cfg.mode == "test" and cfg.test.compile_encoder:
+        model_wrapper.encoder = torch.compile(
+            model_wrapper.encoder,
+            mode=cfg.test.compile_mode,
+            fullgraph=False,
+        )
     
     
     data_module = DataModule(

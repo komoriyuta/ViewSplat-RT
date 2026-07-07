@@ -16,6 +16,7 @@
 
 import torch
 import torch.nn as nn 
+import torch.nn.functional as F
 
 from itertools import repeat
 import collections.abc
@@ -103,11 +104,12 @@ class Attention(nn.Module):
             q = self.rope(q, xpos)
             k = self.rope(k, xpos)
                
-        attn = (q @ k.transpose(-2, -1)) * self.scale
-        attn = attn.softmax(dim=-1)
-        attn = self.attn_drop(attn)
-
-        x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+        x = F.scaled_dot_product_attention(
+            q,
+            k,
+            v,
+            dropout_p=self.attn_drop.p if self.training else 0.0,
+        ).transpose(1, 2).reshape(B, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
         return x
@@ -162,18 +164,21 @@ class CrossAttention(nn.Module):
             q = self.rope(q, qpos)
             k = self.rope(k, kpos)
             
-        attn = (q @ k.transpose(-2, -1)) * self.scale
-        # print("attn", attn.shape)  
-        #torch.Size([b, 12, 257, 514]) or (b*(v-1), 12, 257, 514)
+        attn_mask = None
         if mask is not None:
-            # print("mask", mask.shape)
-            # print("mask", mask.requires_grad)
-            attn = attn + mask.unsqueeze(1)
-            
-        attn = attn.softmax(dim=-1)
-        attn = self.attn_drop(attn)
+            attn_mask = mask.to(device=q.device, dtype=q.dtype)
+            if attn_mask.ndim == 2:
+                attn_mask = attn_mask.unsqueeze(0).unsqueeze(0)
+            elif attn_mask.ndim == 3:
+                attn_mask = attn_mask.unsqueeze(1)
 
-        x = (attn @ v).transpose(1, 2).reshape(B, Nq, C)
+        x = F.scaled_dot_product_attention(
+            q,
+            k,
+            v,
+            attn_mask=attn_mask,
+            dropout_p=self.attn_drop.p if self.training else 0.0,
+        ).transpose(1, 2).reshape(B, Nq, C)
         x = self.proj(x)
         x = self.proj_drop(x)
         return x
@@ -250,4 +255,3 @@ class PatchEmbed(nn.Module):
     def _init_weights(self):
         w = self.proj.weight.data
         torch.nn.init.xavier_uniform_(w.view([w.shape[0], -1])) 
-

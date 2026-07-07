@@ -35,6 +35,8 @@ class cuRoPE2D(torch.nn.Module):
         self.base = freq 
         self.F0 = F0
 
-    def forward(self, tokens, positions): 
-        cuRoPE2D_func.apply( tokens.transpose(1,2), positions, self.base, self.F0 )
-        return tokens
+    @torch.compiler.disable
+    def forward(self, tokens, positions):
+        tokens = tokens.transpose(1, 2).contiguous()
+        cuRoPE2D_func.apply(tokens, positions, self.base, self.F0)
+        return tokens.transpose(1, 2)

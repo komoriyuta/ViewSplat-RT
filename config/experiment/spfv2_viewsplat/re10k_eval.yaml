@@ -1,0 +1,27 @@
+# @package _global_
+
+defaults:
+  - /experiment/spfv2_viewsplat/re10k
+  - override /dataset/view_sampler@dataset.re10k.view_sampler: evaluation
+
+mode: test
+
+wandb:
+  name: re10k_spfv2_viewsplat_test
+
+checkpointing:
+  load: ./pretrained_weights/re10k_spfv2_viewsplat.ckpt
+  resume: false
+
+test:
+  output_path: outputs/test/re10k_spfv2_viewsplat
+  compute_scores: false
+  save_image: false
+  save_video: false
+  save_compare: false
+  with_offset_only: false
+  compile_encoder: false
+  compile_heads: true
+  compile_mode: default
+  channels_last: true
+  half_encoder: true

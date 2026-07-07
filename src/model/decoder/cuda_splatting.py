@@ -2,6 +2,7 @@ from math import isqrt
 from typing import Literal
 
 import torch
+
 from diff_gauss_pose import GaussianRasterizationSettings, GaussianRasterizer
 
 from einops import einsum, rearrange, repeat
@@ -258,5 +259,3 @@ def render_cuda_orthographic(
 
 
 DepthRenderingMode = Literal["depth", "disparity", "relative_disparity", "log"]
-
-
