@@ -13,10 +13,7 @@ ViewSplat-RT keeps the ViewSplat model code and makes the paper implementation u
 On an RTX 4060 Ti 16GB, the optimized real-time path reaches about **20 FPS** with the SPFSplatV2 preset.
 
 <p align="center">
-  <video src="demo_video/realtime_demo.mp4" width="90%" controls muted playsinline></video>
-</p>
-<p align="center">
-  <a href="demo_video/realtime_demo.mp4">Open demo video</a>
+  <img src="demo_video/realtime_demo.gif" width="90%" alt="Realtime demo">
 </p>
 
 ## What Was Added for Real Time
